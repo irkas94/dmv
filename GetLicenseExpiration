@@ -1,0 +1,77 @@
+import json
+import boto3
+from boto3.dynamodb.types import TypeDeserializer
+
+client = boto3.client('dynamodb')
+deserializer = TypeDeserializer()
+
+def unmarshal_dynamodb_item(dynamodb_item):
+    return {k: deserializer.deserialize(v) for k, v in dynamodb_item.items()}
+
+def lambda_handler(event, context):
+    try:
+        # Parse required parameters from event['parameters']
+        def get_param(name):
+            return next((p["value"] for p in event["parameters"] if p["name"] == name), None)
+
+        customer_id = get_param("customerId")
+        
+        if not customer_id:
+            response_text = "Customer ID is required for license lookup."
+        else:
+            # Query DynamoDB using customerId
+            response = client.query(
+                TableName='LicenseUsers',
+                KeyConditionExpression='customerId = :id',
+                ExpressionAttributeValues={
+                    ':id': {'S': customer_id}
+                }
+            )
+
+            items = [unmarshal_dynamodb_item(item) for item in response.get('Items', [])]
+            
+            if not items:
+                response_text = f"No license found for Customer ID: {customer_id}"
+            else:
+                license_info = items[0]
+                # Note the space in the field names
+                expiration_date = license_info.get('expirationDate', '')  # Note the space
+                name = license_info.get('name', 'Unknown')
+                dl_number = license_info.get('dlNumber', '')  # Note the space
+                
+                response_text = f"License {dl_number} for {name} expires on {expiration_date}."
+
+        # Build Bedrock Agent response
+        agent_response = {
+            "response": {
+                "actionGroup": event.get("actionGroup", ""),
+                "function": event.get("function", ""),
+                "functionResponse": {
+                    "responseBody": {
+                        "TEXT": {
+                            "body": response_text
+                        }
+                    }
+                }
+            },
+            "messageVersion": event.get("messageVersion", "1.0")
+        }
+
+        return agent_response
+
+    except Exception as e:
+        error_message = f"Unhandled exception: {str(e)}"
+        return {
+            "response": {
+                "actionGroup": event.get("actionGroup", ""),
+                "function": event.get("function", ""),
+                "functionResponse": {
+                    "responseBody": {
+                        "TEXT": {
+                            "body": error_message
+                        }
+                    }
+                }
+            },
+            "messageVersion": event.get("messageVersion", "1.0")
+        }    
