@@ -1,0 +1,24 @@
+{
+  "actionGroup": "GetLicenseExpiration",
+  "function": "GetLicenseExpiration-irgmd",
+  "parameters": [
+    {
+      "name": "customerId",
+      "value": "1"
+    }
+  ],
+  "messageVersion": "1.0"
+}
+
+
+RESPONSE:
+{
+  "response": {
+    "actionGroup": "GetLicenseExpiration",
+    "function": "GetLicenseExpiration-irgmd",
+    "functionResponse": {
+      "responseBody": {
+        "TEXT": {
+          "body": "License  for Jane Doe expires on 2026-01-01."
+        }
+      }
