@@ -1,48 +1,89 @@
 import json
 import boto3
 from boto3.dynamodb.types import TypeDeserializer
+from datetime import datetime
 
-client = boto3.client('dynamodb')
+# Initialize AWS clients
+dynamodb = boto3.client('dynamodb')
+sns = boto3.client('sns')
 deserializer = TypeDeserializer()
+
+# Replace with your SNS Topic ARN
+SNS_TOPIC_ARN = 'XXXXXXX'
 
 def unmarshal_dynamodb_item(dynamodb_item):
     return {k: deserializer.deserialize(v) for k, v in dynamodb_item.items()}
 
+def send_sns_notification(name, license_info):
+    try:
+        message = (f"License verification completed for {name}.\n"
+                  f"License Number: {license_info.get('dlNumber', 'N/A')}\n"
+                  f"Date of Birth: {license_info.get('dateOfBirth', 'N/A')}\n"
+                  f"Expiration Date: {license_info.get('expirationDate', 'N/A')}")
+        
+        response = sns.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Message=message,
+            Subject='License Verification Notification'
+        )
+        print(f"SNS notification sent: {response}")
+        return True
+    except Exception as e:
+        print(f"Error sending SNS: {str(e)}")
+        return False
+
 def lambda_handler(event, context):
     try:
-        # Parse required parameters from event['parameters']
         def get_param(name):
             return next((p["value"] for p in event["parameters"] if p["name"] == name), None)
 
-        customer_id = get_param("customerId")
+        # Get all three required fields
+        full_name = get_param("name")
+        license_number = get_param("DL-number")
+        dob = get_param("dob")
         
-        if not customer_id:
-            response_text = "Customer ID is required for license lookup."
+        print(f"Input values - Name: {full_name}, License: {license_number}, DOB: {dob}")
+        
+        # Check if all required fields are present
+        if not all([full_name, license_number, dob]):
+            response_text = "All fields (name, license number, and date of birth) are required for verification."
         else:
-            # Query DynamoDB using customerId
-            response = client.query(
+            # Query DynamoDB with all three fields
+            response = dynamodb.scan(
                 TableName='LicenseUsers',
-                KeyConditionExpression='customerId = :id',
+                FilterExpression='#name = :full_name AND #dl = :license AND #dob = :dob',
+                ExpressionAttributeNames={
+                    '#name': 'name',
+                    '#dl': 'dlNumber ',  # Note the space if it exists in your table
+                    '#dob': 'dateOfBirth'
+                },
                 ExpressionAttributeValues={
-                    ':id': {'S': customer_id}
+                    ':full_name': {'S': full_name},
+                    ':license': {'S': license_number},
+                    ':dob': {'S': dob}
                 }
             )
-
+            
+            print(f"DynamoDB Response: {json.dumps(response, default=str)}")
+            
             items = [unmarshal_dynamodb_item(item) for item in response.get('Items', [])]
             
             if not items:
-                response_text = f"No license found for Customer ID: {customer_id}"
+                response_text = "Unable to verify license. Please ensure all information is correct and matches your license exactly."
             else:
                 license_info = items[0]
-                # Note the space in the field names
-                expiration_date = license_info.get('expirationDate', '')  # Note the space
-                name = license_info.get('name', 'Unknown')
-                dl_number = license_info.get('dlNumber', '')  # Note the space
+                expiration_date = license_info.get('expirationDate', '')  # Note the space if it exists
                 
-                response_text = f"License {dl_number} for {name} expires on {expiration_date}."
+                # Send SNS notification
+                sns_sent = send_sns_notification(full_name, license_info)
+                
+                response_text = (
+                    f"License {license_number} verified for {full_name}. "
+                    f"Expires on {expiration_date}. "
+                    f"{'Notification sent.' if sns_sent else 'Notification failed.'}"
+                )
 
-        # Build Bedrock Agent response
-        agent_response = {
+        return {
             "response": {
                 "actionGroup": event.get("actionGroup", ""),
                 "function": event.get("function", ""),
@@ -57,10 +98,9 @@ def lambda_handler(event, context):
             "messageVersion": event.get("messageVersion", "1.0")
         }
 
-        return agent_response
-
     except Exception as e:
-        error_message = f"Unhandled exception: {str(e)}"
+        error_message = f"Error processing request: {str(e)}"
+        print(error_message)
         return {
             "response": {
                 "actionGroup": event.get("actionGroup", ""),
@@ -74,4 +114,4 @@ def lambda_handler(event, context):
                 }
             },
             "messageVersion": event.get("messageVersion", "1.0")
-        }    
+        }
