@@ -1,0 +1,98 @@
+import json
+import boto3
+from boto3.dynamodb.types import TypeDeserializer
+
+# Initialize AWS clients
+dynamodb = boto3.client('dynamodb')
+deserializer = TypeDeserializer()
+
+def unmarshal_dynamodb_item(dynamodb_item):
+    return {k: deserializer.deserialize(v) for k, v in dynamodb_item.items()}
+
+def lambda_handler(event, context):
+    try:
+        def get_param(name):
+            return next((p["value"] for p in event["parameters"] if p["name"] == name), None)
+
+        # Get all three required fields
+        full_name = get_param("name")
+        license_number = get_param("DL-number")
+        dob = get_param("dob")
+        
+        # Debug print
+        print(f"Searching for - Name: {full_name}, License: {license_number}, DOB: {dob}")
+        
+        # First, let's scan the table and see what we have
+        scan_response = dynamodb.scan(
+            TableName='LicenseUsers',
+            Limit=1
+        )
+        print("Sample item from table:", json.dumps(scan_response.get('Items', [])[:1], default=str))
+        
+        # Now try the actual query
+        response = dynamodb.scan(
+            TableName='LicenseUsers',
+            FilterExpression='#name = :full_name AND #dl = :license AND #dob = :dob',
+            ExpressionAttributeNames={
+                '#name': 'name',
+                '#dl': 'dlNumber ',  # Note: trying with space
+                '#dob': 'dateOfBirth'
+            },
+            ExpressionAttributeValues={
+                ':full_name': {'S': full_name.strip()},
+                ':license': {'S': license_number.strip()},
+                ':dob': {'S': dob.strip()}
+            }
+        )
+        
+        # Debug print
+        print(f"DynamoDB Query Response: {json.dumps(response, default=str)}")
+        
+        items = [unmarshal_dynamodb_item(item) for item in response.get('Items', [])]
+        
+        if not items:
+            response_text = (
+                f"No matching license found. Debug info:\n"
+                f"Searched for:\n"
+                f"Name: {full_name}\n"
+                f"License: {license_number}\n"
+                f"DOB: {dob}"
+            )
+        else:
+            license_info = items[0]
+            # Try both with and without space
+            expiration_date = license_info.get('expirationDate ', '') or license_info.get('expirationDate', '')
+            response_text = f"Your license expires on: {expiration_date}"
+
+        return {
+            "response": {
+                "actionGroup": event.get("actionGroup", ""),
+                "function": event.get("function", ""),
+                "functionResponse": {
+                    "responseBody": {
+                        "TEXT": {
+                            "body": response_text
+                        }
+                    }
+                }
+            },
+            "messageVersion": event.get("messageVersion", "1.0")
+        }
+
+    except Exception as e:
+        error_message = f"Error processing request: {str(e)}"
+        print(error_message)
+        return {
+            "response": {
+                "actionGroup": event.get("actionGroup", ""),
+                "function": event.get("function", ""),
+                "functionResponse": {
+                    "responseBody": {
+                        "TEXT": {
+                            "body": error_message
+                        }
+                    }
+                }
+            },
+            "messageVersion": event.get("messageVersion", "1.0")
+        }
