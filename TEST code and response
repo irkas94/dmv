@@ -1,24 +1,30 @@
 {
-  "actionGroup": "GetLicenseExpiration",
-  "function": "GetLicenseExpiration-irgmd",
+  "actionGroup": "LicenseVerification",
+  "function": "VerifyLicense",
   "parameters": [
     {
-      "name": "customerId",
-      "value": "1"
+      "name": "name",
+      "value": "Jane Doe"
+    },
+    {
+      "name": "DL-number",
+      "value": "12344321"
+    },
+    {
+      "name": "dob",
+      "value": "2000-11-10"
     }
   ],
   "messageVersion": "1.0"
 }
 
 
-RESPONSE:
-{
-  "response": {
-    "actionGroup": "GetLicenseExpiration",
-    "function": "GetLicenseExpiration-irgmd",
-    "functionResponse": {
-      "responseBody": {
-        "TEXT": {
-          "body": "License  for Jane Doe expires on 2026-01-01."
-        }
-      }
+SNS:
+
+Subject:
+License Verification Notification
+
+License verification completed for Jane Doe.
+License Number: N/A
+Date of Birth: 2000-11-10
+Expiration Date: 2026-01-01
